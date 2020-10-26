@@ -1,13 +1,14 @@
-faers_ml
+# faers_ml
+
 ==============================
 
 Explore the Faers api and have some fun
 
-Project Organization
+Cookiecutter Project Organization
 ------------
 
     ├── LICENSE
-    ├── Makefile           <- Makefile with commands like `make data` or `make train`
+    ├── Makefile           <- Not using
     ├── README.md          <- The top-level README for developers using this project.
     ├── data
     │   ├── external       <- Data from third party sources.
@@ -15,7 +16,7 @@ Project Organization
     │   ├── processed      <- The final, canonical data sets for modeling.
     │   └── raw            <- The original, immutable data dump.
     │
-    ├── docs               <- A default Sphinx project; see sphinx-doc.org for details
+    ├── docs               <- md about Faers
     │
     ├── models             <- Trained and serialized models, model predictions, or model summaries
     │
