@@ -25,20 +25,15 @@ In order to gather some useful data for exploration, I'll leverage the following
         
 * patient.reaction.reactionmeddrapt
 
-    Patient reaction, as a MedDRA term. Note: MedDRA has a hierarchical organization, and I'd leverage that taxonomy here, but it is a paid/subscription service so I'm unable to for this case study.
+    * Patient reaction, as a MedDRA term. Note: MedDRA has a hierarchical organization, and I'd leverage that taxonomy here, but it is a paid/subscription service so I'm unable to for this case study.
     
     * This returns counts of specific patient reaction
-* patient.reaction.reactionoutcome
+* serious
 
-    * Outcome of the reaction in reactionmeddrapt at the time of last observation.
-
+    * Seriousness of the adverse event.
     * Value is one of the following
-1 = Recovered/resolved
-2 = Recovering/resolving
-3 = Not recovered/not resolved
-4 = Recovered/resolved with sequelae (consequent health issues)
-5 = Fatal
-6 = Unknown
+1 = The adverse event resulted in death, a life threatening condition, hospitalization, disability, congenital anomaly, or other serious condition
+2 = The adverse event did not result in any of the above
 
 * patient.patientagegroup
 
@@ -48,5 +43,15 @@ In order to gather some useful data for exploration, I'll leverage the following
   '4': 'Recovered/resolved with sequelae (consequent health issues)',
   '5': 'Fatal'
 
-### Data Collection
-In order to explore and manipulate some data, I created a class to enable easy interaction with the API for my purposes. This is available [here](. In particular I made a recursive method that would make a
+### Data Exploration
+In order to quickly acquire data to explore and manipulate, I created a class to enable easy interaction with the API for my purposes. This is available [here](https://github.com/cshwery/faers_ml/blob/master/src/data/helpers.py). This allows me to quickly create a dataset for exploratory visualization, which I did with the following design:
+* Iterate through the drugs listed above (initial_drug)
+    * For each drug, identify the 10 drugs which co-occur with the initial drug most frequently in the database ('interaction_drug').
+        * For each (initial_drug,interaction_drug) pair get the top 10 most frequent reactions.
+        * For each (initial_drug,interaction_drug,reaction) combination, partition it by whether or not it was serious
+* Visualize the results in a heat map. In particular, visualize the the % of an outcome involving that interaction pair. This is done by dividing the count of times the drug was co-incident with another drug by how many times the initial_drug was associated with a specific reaction.
+
+To gather the data the following code was leveraged [here]()
+
+Additionally, I made a recursive method (.return_categorical_counts) that takes as input a set of parameters and a set of categories and the values they take, and recursively makes api calls for all combination of category states (while also leveraging the input parameters). However, this was not done at this step.    
+
