@@ -51,7 +51,129 @@ In order to quickly acquire data to explore and manipulate, I created a class to
         * For each (initial_drug,interaction_drug,reaction) combination, partition it by whether or not it was serious
 * Visualize the results in a heat map. In particular, visualize the the % of an outcome involving that interaction pair. This is done by dividing the count of times the drug was co-incident with another drug by how many times the initial_drug was associated with a specific reaction.
 
-To gather the data the following code was leveraged [here]()
+To gather the data the following code was leveraged in this [notebook](https://github.com/cshwery/faers_ml/blob/master/notebooks/1.1-ces-faers_exploration.ipynb)
+```python
+import pandas as pd
+import requests
+import json
+import sys
+#put root in path
+sys.path.append('../')
+from src.data import helpers
+from src.data import faers_translations
+from copy import deepcopy
+import os
+from dotenv import load_dotenv
+import time
+load_dotenv()
 
+#will only work with following key in environment variables or in .env
+os.environ['fda_api_key']
+
+# Partially pre-loaded config dicts to make code less verbose
+params_10_interacts = {'search': {'receivedate': '[20040101+TO+20201024]'}#,'patient.drug.medicinalproduct':'symbicort'.upper()}
+                       , 'count':'patient.drug.medicinalproduct.exact'
+                       , 'limit':11
+                      } #11 because drug will be listed in the results
+params_10_reacts = {'search': {'receivedate': '[20040101+TO+20201024]'}#,'patient.drug.medicinalproduct':'symbicort'.upper()}
+                    , 'count':'patient.reaction.reactionmeddrapt.exact'
+                    , 'limit':10
+                   }
+params_serious = {'search': {'receivedate': '[20040101+TO+20201024]'}#,'patient.drug.medicinalproduct':'symbicort'.upper()}
+                  , 'count':'serious'
+                 }
+
+a_z_drugs = ['symbicort','tagrisso','nexium','crestor','farxiga','brilinta','pulmicort','faslodex','zoladex','seloken','toprol-xl']
+A_Z_drugs = [drug.upper() for drug in a_z_drugs]
+A_Z_drugs
+
+def pause_if_required(query_count):
+    "Simple function to avoid fda api 240 requests/minute rate limit"
+    if query_count >= 220:
+        print('pausing for 60 seconds')
+        time.sleep(60)
+        return 0
+    else:
+        return query_count
+
+failed_drug_queries = []
+query_count = 0
+initialized = False
+for initial_drug in A_Z_drugs:
+    #Get top 10 interactions
+    _params_10_interacts_ = deepcopy(params_10_interacts)
+    _params_10_interacts_['search'].update({'patient.drug.medicinalproduct':initial_drug})
+    #print(params_10_interacts)
+    try:
+        query_count = pause_if_required(query_count)
+        initial_results = faersApi.make_call(_params_10_interacts_).json()['results']
+        query_count +=1
+        print(f'fetching co-occuring drug data for {initial_drug}')
+    except KeyError:
+        # This occurs when a search for a given drug fails to return any results
+        failed_drug_queries.append(initial_drug)
+        print(f'{initial_drug} query did not return results')
+        query_count +=1
+        continue
+    for interaction_drug in [res['term'] for res in initial_results]:
+        _params_10_reacts_ = deepcopy(params_10_reacts)
+        _params_10_reacts_['search'].update({'patient.drug.medicinalproduct':initial_drug,
+                                             'patient.drug.medicinalproduct.exact':interaction_drug})
+        try:
+            query_count = pause_if_required(query_count)
+            interaction_results = faersApi.make_call(_params_10_reacts_).json()['results']
+            query_count += 1
+            print(f'\tfetching reactions data for ({initial_drug},{interaction_drug})')
+        except KeyError:
+            failed_drug_queries.append((initial_drug,interaction_drug))
+            print(f'({initial_drug},{interaction_drug}) query did not return results')
+            query_count +=1
+            continue
+        for reaction in [res['term'] for res in interaction_results]:
+            init_int_react_params = deepcopy(params_serious)
+            init_int_react_params['search'].update({'patient.drug.medicinalproduct':initial_drug,
+                                          'patient.drug.medicinalproduct.exact':interaction_drug,
+                                          'patient.reaction.reactionmeddrapt.exact':reaction})
+            try:
+                query_count = pause_if_required(query_count)
+                init_int_react_results = faersApi.make_call(init_int_react_params).json()['results']
+                query_count += 1
+                print(f'\t\tfetching init/int/react data for {init_int_react_params}')
+            except KeyError:
+                query_count +=1
+                # Try using non-exact reactions
+                init_int_react_params = deepcopy(params_serious)
+                init_int_react_params['search'].update({'patient.drug.medicinalproduct':initial_drug,
+                                                        'patient.drug.medicinalproduct.exact':interaction_drug,
+                                                        'patient.reaction.reactionmeddrapt':reaction})
+                try:
+                    query_count = pause_if_required(query_count)
+                    init_int_react_results = faersApi.make_call(init_int_react_params).json()['results']
+                    query_count += 1
+                    print(f'\t\tfetching non-exact init/int/react data for ({init_int_react_params})')
+                except KeyError:
+                    failed_drug_queries.append((initial_drug,interaction_drug,reaction))
+                    print(f'({initial_drug},{interaction_drug},{reaction}) query did not return results')
+                    query_count += 1
+                    continue
+            # Add the query specific data to the results
+            for res in init_int_react_results:
+                res.update({'initial_drug':initial_drug,'interaction_drug':interaction_drug,'reaction':reaction})
+            if not initialized:
+                # make a pd.DataFrame first time, subsequently create temporary df and concatnate to main_df
+                df = pd.DataFrame.from_records(init_int_react_results)
+                initialized = True
+            else:
+                df = pd.concat([df,
+                                pd.DataFrame.from_records(init_int_react_results)])
+
+```
+Typically, I would have my data folder in my .gitignore but I uploaded the .csv with the results from above here.
+
+The following code used for visualization can be found in this [notebook](https://github.com/cshwery/faers_ml/blob/master/notebooks/1.0-ces-faers_viz.ipynb).
+
+```python
+
+```
 Additionally, I made a recursive method (.return_categorical_counts) that takes as input a set of parameters and a set of categories and the values they take, and recursively makes api calls for all combination of category states (while also leveraging the input parameters). However, this was not done at this step.    
 
