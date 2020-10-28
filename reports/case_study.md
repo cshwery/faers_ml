@@ -1,4 +1,5 @@
 # FAERS Case Study
+##### Clay Shwery
 
 FAERS is an FDA database and API of adverse events associated with medicinal products (a broad term, which can include more than pharmaceuticals, but I'll use the term 'drug' here liberally). This case study examines patient reactions and interactions around a group of drugs, namely the 2019 top 10 best selling drugs by AstraZeneca (as found in [this article](https://www.biopharmadive.com/news/astrazeneca-pharma-dive-awards/566229/#:~:text=Lung%20cancer%20drug%20Tagrisso%20has,overtaking%20Symbicort%20earlier%20this%20year.)). 
 ### Drugs of interest in this case study:
@@ -54,13 +55,10 @@ In order to quickly acquire data to explore and manipulate, I created a class to
 To gather the data the following code was leveraged in this [notebook](https://github.com/cshwery/faers_ml/blob/master/notebooks/1.1-ces-faers_exploration.ipynb)
 ```python
 import pandas as pd
-import requests
-import json
 import sys
 #put root in path
 sys.path.append('../')
 from src.data import helpers
-from src.data import faers_translations
 from copy import deepcopy
 import os
 from dotenv import load_dotenv
@@ -69,6 +67,8 @@ load_dotenv()
 
 #will only work with following key in environment variables or in .env
 os.environ['fda_api_key']
+
+faersApi = helpers.FaersApi()
 
 # Partially pre-loaded config dicts to make code less verbose
 params_10_interacts = {'search': {'receivedate': '[20040101+TO+20201024]'}#,'patient.drug.medicinalproduct':'symbicort'.upper()}
@@ -167,13 +167,91 @@ for initial_drug in A_Z_drugs:
                 df = pd.concat([df,
                                 pd.DataFrame.from_records(init_int_react_results)])
 
+df.to_csv('../data/interim/extracted_data.csv',index=False)
 ```
-Typically, I would have my data folder in my .gitignore but I uploaded the .csv with the results from above here.
+Typically, I would have my data folder in my .gitignore but I forced git to upload the .csv with the results from above [here](https://github.com/cshwery/faers_ml/blob/master/data/interim/extracted_data.csv).
 
 The following code used for visualization can be found in this [notebook](https://github.com/cshwery/faers_ml/blob/master/notebooks/1.0-ces-faers_viz.ipynb).
 
 ```python
+import seaborn as sns
+sns.set_theme()
+import pandas as pd
+from copy import deepcopy
+import matplotlib.pyplot as plt
 
+df_ = pd.read_csv('../data/interim/extracted_data.csv')
+
+# Cleanup
+df_ = df_.reset_index(drop=True).rename({'term':'serious'},axis=1)
+# Make the 'serious' column more useful, e.g. make 'Not Serious' into 0, keep 'Serious' as 1
+df_.loc[df_['serious']==2,'serious'] = 0
+
+# iterate by initial drug, group by interaction_drug & reaction, prepare data for sns heatmaps
+drugs_grouped = {}
+for initial_drug in df_['initial_drug'].unique():
+    df_drug = df_.loc[df_['initial_drug']==initial_drug]
+    grp_records = {}
+    for idx, grp in df_drug.groupby(['interaction_drug','reaction']):
+        grp_records[idx] = {'count':grp['count'].sum()
+                            ,'%serious':grp.loc[grp['serious']==1,'count'].sum()/grp['count'].sum()  
+                           }
+    drugs_grouped[initial_drug] = deepcopy(grp_records)
+
+# For each drug, we create heatmaps showing the severity of each interaction pair/reaction combination 
+# We annotate withh the log of the counts to avoid chasing down small sample size examples
+for key,val in drugs_grouped.items():
+    # Restructure for sns
+    df_drug = pd.DataFrame.from_dict(drugs_grouped[key],orient='index')\
+            .reset_index()\
+            .rename({'level_0':'interaction_drug','level_1':'reaction'},axis=1)
+    df_drug = df_drug.loc[df_drug['interaction_drug']!=key]
+    df_severity = df_drug.copy().pivot(index='interaction_drug',columns='reaction',values='%serious')
+    df_counts = df_drug.copy().pivot(index='interaction_drug',columns='reaction',values='count')
+    # Make the counts into logs so we can read them in annotations
+    for col in df_counts:
+        df_counts[col] = df_counts[col].apply(lambda x: round(math.log10(x),1))
+    fig, ax = plt.subplots(figsize=(12, 8))
+    fig.suptitle(f'Severity of {key} reactions by interaction', fontsize=20)
+    #plt.title = f'Severity of {key} interactions and reactions'
+    ax = sns.heatmap(df_severity,annot=df_counts,vmin=0,vmax=1,cmap=plt.get_cmap('Reds'))
+    plt.tight_layout()
+    plt.savefig(f'../reports/figures/{key}.png')
 ```
-Additionally, I made a recursive method (.return_categorical_counts) that takes as input a set of parameters and a set of categories and the values they take, and recursively makes api calls for all combination of category states (while also leveraging the input parameters). However, this was not done at this step.    
 
+This allows us to quickly examine a number potential cases to address in further depth. Here is one such heatmap.
+![FASLODEX](figures/FASLODEX.png)
+
+The interaction between FASLODEX and XELODA seems like it shows an interesting pattern, with more serious outcomes even when considering reactions that do not have uniform high severity like Fatigue.
+
+### ML and further areas to investigate
+
+To investigate this further (which I won't have time to execute), what I would do is gather records where either FASLODEX or XELODA was used, as well as some noise data for commonly occurring reactions in which neither was drug was administered. 
+
+This code helps acquire the FASLODEX and XELODA training data:
+
+```python
+params_faslodex_xeloda = {'search': ['receivedate=[20040101+TO+20201024]'
+             ,'(patient.drug.medicinalproduct.exact=faslodex+xeloda)'.upper()
+             #,'patient.drug.medicinalproduct.exact':'xeloda'.upper()                      
+                                    ]
+             #, 'count':'patient.drug.medicinalproduct'
+             ,'limit':1000
+             #,'skip':30000
+            }
+results_list = [] 
+resp = faersApi.make_call(params_faslodex_xeloda)
+results_list.extend(resp.json()['results'])
+while resp.links.get('next') and resp.links['next'].get('url'):
+    print(resp.links['next'].get('url'))
+    resp = requests.get(resp.links['next'].get('url'),auth=HTTPBasicAuth('AxJ349dp7cWgZrO4dYC7mk3M4cTqHqa4n375Fao0',''))
+    results_list.extend(resp.json()['results'])
+```
+
+Noise data could be acquired by selecting a randomly selected number of records for the top 20 most commonly occuring reactions was present.
+
+Assuming that 'serious' is an acceptable outcome parameter (which is an assumption that would need to be checked), the next major task would be feature engineering. The return acquired using the code will need to be transformed in order to build a model on it. I would use a technique borrowed from NLP and treat the drugs involved as a list of tokens. Then I would use a count vectorizer on those lists, and transform the data into binary variables for each drug administered. This would be very sparse, and variables that are not used frequently enough in the dataset would need to be pared. A similar technique could be applied to transform reactions. I'd also include some numeric data like onset age and potentially weight. Other categorical data that would be included would be gender.
+
+I'd try at first a few models, one of which would be logistic regression since the outcome is a binary (I'd transform the values for the outcome variable from 1=serious/2=not serious to 1=serious/0=not serious) valued variable and this is a classification test. Additionally I'd include interaction effects between certain sets of the categorical variables, in particluar the drugs administered. 
+
+Other potentially valuable approaches would be random forests, and gradient boosted trees. 
